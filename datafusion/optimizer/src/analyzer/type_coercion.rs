@@ -30,7 +30,8 @@ use datafusion_common::config::ConfigOptions;
 use datafusion_common::tree_node::{Transformed, TreeNode, TreeNodeRewriter};
 use datafusion_common::{
     exec_err, internal_err, not_impl_err, plan_datafusion_err, plan_err, Column,
-    DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, TableReference,
+    DFSchema, DFSchemaRef, DataFusionError, Diagnostic, Result, ScalarValue,
+    TableReference,
 };
 use datafusion_expr::expr::{
     self, Alias, Between, BinaryExpr, Case, Exists, InList, InSubquery, Like,
@@ -359,10 +360,23 @@ impl TreeNodeRewriter for TypeCoercionRewriter<'_> {
                     negated,
                 ))))
             }
-            Expr::Not(expr) => Ok(Transformed::yes(not(get_casted_expr_for_bool_op(
-                *expr,
-                self.schema,
-            )?))),
+            expr @ Expr::Not(_) => {
+                let whole_span = expr.spans().and_then(|spans| spans.first());
+                let Expr::Not(sub) = expr else { unreachable!() };
+                let (data_type, _) = sub.data_type_and_nullable(self.schema)?;
+                let sub_span = sub.spans().and_then(|spans| spans.first());
+                let casted_expr = dbg!(get_casted_expr_for_bool_op(*sub, self.schema))
+                    .map_err(|err| {
+                        let diagnostic = Diagnostic::new_error(
+                            "expression has incompatible types",
+                            whole_span,
+                        )
+                        .with_note("expected type Boolean", None)
+                        .with_note(format!("has type {}", data_type), sub_span);
+                        err.with_diagnostic(diagnostic)
+                    })?;
+                Ok(Transformed::yes(not(casted_expr)))
+            }
             Expr::IsTrue(expr) => Ok(Transformed::yes(is_true(
                 get_casted_expr_for_bool_op(*expr, self.schema)?,
             ))),

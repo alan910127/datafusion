@@ -222,6 +222,20 @@ fn test_incompatible_types_binary_arithmetic() -> Result<()> {
 }
 
 #[test]
+fn test_incompatible_types_unary_not() -> Result<()> {
+    let query = "SELECT /*whole*/NOT /*sub*/first_name/*sub+whole*/ FROM person";
+    let spans = get_spans(query);
+    let diag = do_query(query);
+    assert_eq!(diag.message, "expressions have incompatible types");
+    assert_eq!(diag.span, Some(spans["whole"]));
+    assert_eq!(diag.notes[0].message, "expected type Boolean");
+    assert_eq!(diag.notes[0].span, None);
+    assert_eq!(diag.notes[1].message, "has type Utf8");
+    assert_eq!(diag.notes[1].span, Some(spans["sub"]));
+    Ok(())
+}
+
+#[test]
 fn test_field_not_found_suggestion() -> Result<()> {
     let query = "SELECT /*whole*/first_na/*whole*/ FROM person";
     let spans = get_spans(query);
